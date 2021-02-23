@@ -19,6 +19,11 @@ perf record -- ${DIR}/build/canny ${DIR}/build/221575.pgm 0.5 0.7 0.9
 perf report -n --stdio
 ```
 
+CPU cache stats:
+```bash
+perf stat -e L1-dcache-load-misses,L1-dcache-loads,LLC-load-misses,LLC-loads ${DIR}/build/canny ${DIR}/build/221575.pgm 0.5 0.7 0.9
+```
+
 Auto-vectorized loops (other helpful flags are `-Rpass-missed=loop-vectorize`, `-Rpass-analysis=loop-vectorize`):
 ```bash
 clang -O3 -Rpass=loop-vectorize -S canny_source.c -o /dev/null
