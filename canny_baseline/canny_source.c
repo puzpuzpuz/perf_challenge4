@@ -372,7 +372,7 @@ void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
 void derrivative_x_y(short int *smoothedim, int rows, int cols,
         short int **delta_x, short int **delta_y)
 {
-   int r, c, pos, ypos1, ypos2;
+   int r, c, pos;
 
    /****************************************************************************
    * Allocate images to store the derivatives.
@@ -406,12 +406,16 @@ void derrivative_x_y(short int *smoothedim, int rows, int cols,
    * losing pixels.
    ****************************************************************************/
    if(VERBOSE) printf("   Computing the Y-direction derivative.\n");
-   for(r=0;r<rows;r++){
+   for(r=1;r<rows-1;r++){
       for(c=0;c<cols;c++){
-         ypos1 = r == rows-1 ? 0 : cols;
-         ypos2 = r == 0 ? 0 : cols;
-         (*delta_y)[r*cols+c] = smoothedim[r*cols+c+ypos1] - smoothedim[r*cols+c-ypos2];
+         (*delta_y)[r*cols+c] = smoothedim[r*cols+c+cols] - smoothedim[r*cols+c-cols];
       }
+   }
+   for(c=0;c<cols;c++){
+      (*delta_y)[c] = smoothedim[c+cols] - smoothedim[c];
+   }
+   for(c=0;c<cols;c++){
+      (*delta_y)[(rows-1)*cols+c] = smoothedim[(rows-1)*cols+c] - smoothedim[(rows-1)*cols+c-cols];
    }
 }
 
@@ -493,16 +497,12 @@ void gaussian_smooth(unsigned char *image, int rows, int cols, float sigma,
    ****************************************************************************/
    if(VERBOSE) printf("   Bluring the image in the Y-direction.\n");
    for(r=0;r<rows;r++){
-      for(rr=(-center);rr<0;rr++){
-         for(c=-rr;c<cols;c++){
-            dot[c] += tempim[(r+rr)*cols+c] * kernel[center+rr];
-            sum[c] += kernel[center+rr];
-         }
-      }
-      for(rr=0;rr<=center;rr++){
-         for(c=0;c<cols-rr;c++){
-            dot[c] += tempim[(r+rr)*cols+c] * kernel[center+rr];
-            sum[c] += kernel[center+rr];
+      for(rr=-center;rr<=center;rr++){
+         if(((r+rr) >= 0) & ((r+rr) < rows)){
+            for(c=0;c<cols;c++){
+               dot[c] += tempim[(r+rr)*cols+c] * kernel[center+rr];
+               sum[c] += kernel[center+rr];
+            }
          }
       }
       for(c=0;c<cols;c++){
@@ -723,6 +723,7 @@ void non_max_supp(short *mag, short *gradx, short *grady, int nrows, int ncols,
     short m00,gx,gxabs,gy,gyabs;
     float mag1,mag2,xperp,yperp;
     unsigned char *resultrowptr, *resultptr;
+    int z1_offset[8],z2_offset[8],cond1,cond2,cond3,entry;
     
 
    /****************************************************************************
@@ -738,9 +739,29 @@ void non_max_supp(short *mag, short *gradx, short *grady, int nrows, int ncols,
         *resultptr = *resultrowptr = (unsigned char) 0;
     }
 
+
    /****************************************************************************
    * Suppress non-maximum points.
    ****************************************************************************/
+   // lookup tables for pointer offsets
+   z1_offset[1 << 2 | 1 << 1 | 1] = 1;
+   z1_offset[1 << 2 | 1 << 1] = -1;
+   z1_offset[1 << 2 | 1] = 1;
+   z1_offset[1 << 2] = -1;
+   z1_offset[1 << 1 | 1] = ncols;
+   z1_offset[1] = -ncols;
+   z1_offset[1 << 1] = ncols;
+   z1_offset[0] = -ncols;
+
+   z2_offset[1 << 2 | 1 << 1 | 1] = ncols + 1;
+   z2_offset[1 << 2 | 1 << 1] = ncols - 1;
+   z2_offset[1 << 2 | 1] = -ncols + 1;
+   z2_offset[1 << 2] = -ncols - 1;
+   z2_offset[1 << 1 | 1] = ncols + 1;
+   z2_offset[1 << 1] = ncols - 1;
+   z2_offset[1] = -ncols + 1;
+   z2_offset[0] = -ncols - 1;
+
    for(rowcount=1,magrowptr=mag+ncols+1,gxrowptr=gradx+ncols+1,
       gyrowptr=grady+ncols+1,resultrowptr=result+ncols+1;
       rowcount<nrows-2; 
@@ -753,21 +774,23 @@ void non_max_supp(short *mag, short *gradx, short *grady, int nrows, int ncols,
             gx = *gxptr;
             gy = *gyptr;
 
-            z2 = *(magptr + ((gy < 0) ? ncols : -ncols) + ((gx < 0) ? 1 : -1));
-            z22 = *(magptr - ((gy < 0) ? ncols : -ncols) - ((gx < 0) ? 1 : -1));
-
             gxabs = (gx < 0) ? -gx : gx;
             gyabs = (gy < 0) ? -gy : gy;
-            if (gxabs >= gyabs) {
-               z1 = *(magptr + (gx < 0 ? 1 : -1));
-               z11 = *(magptr - (gx < 0 ? 1 : -1));
 
-               mag1 = (z1 - m00)*gxabs + (z2 - z1)*gyabs;
+            cond1 = (gxabs >= gyabs) << 2;
+            cond2 = (gy < 0) << 1;
+            cond3 = (gx < 0);
+            entry = cond1 | cond2 | cond3;
+
+            z1 = *(magptr + z1_offset[entry]);
+            z11 = *(magptr - z1_offset[entry]);
+            z2 = *(magptr + z2_offset[entry]);
+            z22 = *(magptr - z2_offset[entry]);
+
+            if (gxabs >= gyabs) {
+               mag1 = (z1 - m00)*gxabs + (z2 - z1)*gyabs;               
                mag2 = (z11 - m00)*gxabs + (z22 - z11)*gyabs;
             } else {
-               z1 = *(magptr + (gy < 0 ? ncols : -ncols));
-               z11 = *(magptr - (gy < 0 ? ncols : -ncols));
-
                mag1 = (z2 - z1)*gxabs + (z1 - m00)*gyabs;
                mag2 = (z22 - z11)*gxabs + (z11 - m00)*gyabs;
             }
